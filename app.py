@@ -1,23 +1,22 @@
 import os
 import io
-import asyncio
 import requests
 from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-# Apna Telegram Bot Token yahan daalein
 TOKEN = "8857671703:AAHSIW_f1trqBw43SyunwUTjI8knMtipg"
 PORT = int(os.environ.get("PORT", 5000))
 
 app = Flask(__name__)
+
+# Build Telegram application
 telegram_app = Application.builder().token(TOKEN).build()
 
-# RankGuruji Style Scorecard Image Generator (Pillow in-memory buffer)
+# RankGuruji Style Scorecard Image Generator
 def generate_scorecard(candidate_name, roll_no, marks_data):
-    # Canvas setup (800x600 pixels, white background)
     img = Image.new("RGB", (800, 600), color=(255, 255, 255))
     draw = ImageDraw.Draw(img)
     
@@ -43,36 +42,29 @@ def generate_scorecard(candidate_name, roll_no, marks_data):
     draw.text((50, 265), f"Incorrect Answers (-0.33): {marks_data['incorrect']}", fill=(255, 0, 0), font=font_small)
     draw.text((50, 310), f"Final Score: {marks_data['score']:.2f}", fill=(0, 0, 128), font=font_large)
 
-    # Watermark (Selection Roadmap)
+    # Watermark
     draw.text((250, 460), "SELECTION ROADMAP", fill=(230, 230, 230), font=font_large)
 
-    # Save to RAM Buffer (No PermissionError)
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context):
     await update.message.reply_text("🤖 Welcome! Send your TCS iON / Digialm answer key link to get your RankGuruji Scorecard.")
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_message(update: Update, context):
     text = update.message.text
     if "digialm.com" in text:
         await update.message.reply_text("⏳ Fetching and processing your scorecard, please wait...")
         try:
-            # Yahan aap apna BeautifulSoup parsing logic lagakar real data nikal sakte hain
-            # Filhal testing ke liye sample data:
             marks_data = {
                 'total': 100,
                 'correct': 78,
                 'incorrect': 12,
                 'score': 74.04
             }
-            
-            # Generate Image in RAM
             img_buffer = generate_scorecard("Rahul Kumar", "RRB98765432", marks_data)
-            
-            # Send photo back to Telegram user
             await update.message.reply_photo(
                 photo=img_buffer, 
                 caption="🎉 **Here is your official RankGuruji Scorecard!**"
@@ -85,24 +77,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-loop = asyncio.get_event_loop()
-
-async def setup():
-    await telegram_app.initialize()
-    await telegram_app.start()
-
-loop.run_until_complete(setup())
-
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    json_data = request.get_json(force=True)
-    update = Update.de_json(json_data, telegram_app.bot)
-    asyncio.run_coroutine_threadsafe(telegram_app.process_update(update), loop)
+    if request.method == "POST":
+        json_data = request.get_json(force=True)
+        update = Update.de_json(json_data, telegram_app.bot)
+        
+        # Run telegram app initialization and process update synchronously for gunicorn
+        import asyncio
+        async def process():
+            await telegram_app.initialize()
+            await telegram_app.process_update(update)
+            
+        asyncio.run(process())
     return "OK", 200
 
 @app.route("/")
 def index():
-    return "Bot is running live via Webhook with Scorecard Generator!", 200
+    return "Bot is running live via Webhook!", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT)
