@@ -11,10 +11,15 @@ PORT = int(os.environ.get("PORT", 5000))
 
 app = Flask(__name__)
 
-# Build Telegram Application
+# Initialize Telegram Application globally
 telegram_app = Application.builder().token(TOKEN).build()
 
-# RankGuruji Style Scorecard Image Generator
+async def setup_bot():
+    await telegram_app.initialize()
+
+# Run initialization on startup
+asyncio.run(setup_bot())
+
 def generate_scorecard(candidate_name, roll_no, marks_data):
     img = Image.new("RGB", (800, 600), color=(255, 255, 255))
     draw = ImageDraw.Draw(img)
@@ -80,13 +85,13 @@ telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_
 def webhook():
     if request.method == "POST":
         json_data = request.get_json(force=True)
+        update = Update.de_json(json_data, telegram_app.bot)
         
-        async def process():
+        async def process_update():
             async with telegram_app:
-                update = Update.de_json(json_data, telegram_app.bot)
                 await telegram_app.process_update(update)
                 
-        asyncio.run(process())
+        asyncio.run(process_update())
     return "OK", 200
 
 @app.route("/")
