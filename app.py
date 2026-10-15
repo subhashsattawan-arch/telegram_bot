@@ -3,6 +3,7 @@ import re
 import io
 import html
 import logging
+import traceback
 from urllib.parse import urlparse, urlunparse
 
 import cloudscraper
@@ -20,7 +21,6 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("selection-roadmap")
 
-# Use cloudscraper to bypass TCS iON / Cloudflare HTTP 400 block completely
 SCRAPER = cloudscraper.create_scraper(
     browser={
         'browser': 'chrome',
@@ -60,7 +60,6 @@ def normalize_url(raw_url):
     if not allowed:
         raise ValueError("Yeh Digialm/TCS iON Answer Key link nahi lag raha hai.")
 
-    # Clean up double slashes in path
     clean_path = re.sub(r'/+', '/', parsed.path)
 
     return urlunparse((
@@ -86,7 +85,7 @@ def extract_url(message):
     return None
 
 
-# -------------------------- Fetch and parse using cloudscraper --------------------------
+# -------------------------- Fetch and parse --------------------------
 
 def fetch_answer_key(url):
     response = SCRAPER.get(url, timeout=(15, 45))
@@ -553,8 +552,10 @@ def process_telegram_update(update):
             message_id
         )
     except Exception as exc:
-        log.exception("Scorecard generation failed")
-        send_message(chat, f"❌ {str(exc)[:900]}", message_id)
+        err_msg = str(exc)
+        log.exception("Scorecard generation failed: %s", err_msg)
+        # Send exact error trace to telegram chat so you can see why it failed instantly
+        send_message(chat, f"❌ Error: {err_msg[:400]}", message_id)
 
 
 # -------------------------- Flask webhook --------------------------
@@ -583,8 +584,8 @@ def telegram_webhook():
 
     try:
         process_telegram_update(update)
-    except Exception:
-        log.exception("Webhook processing failed")
+    except Exception as e:
+        log.error("Critical webhook crash: %s", traceback.format_exc())
     return jsonify({"ok": True}), 200
 
 
